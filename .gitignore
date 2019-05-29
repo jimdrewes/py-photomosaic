@@ -1,0 +1,11 @@
+client_secret.json
+credentials.json
+sourceimages/
+sourceimages/*
+output/
+output/*
+images/
+images/*
+*.pyc
+.vscode*
+.DS_Store
