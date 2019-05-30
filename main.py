@@ -1,19 +1,21 @@
-from httplib2 import Http
-from oauth2client import client, tools
-from oauth2client.file import Storage
-from apiclient.discovery import build
-from urllib import request
-from urllib.request import urlretrieve
-from PIL import Image, ImageFilter
+import argparse
 import datetime
 import json
 import os.path
 import random
+from urllib import request
+from urllib.request import urlretrieve
 
-MAXLIBRARYSIZE = 10000
-TILEWIDTH = 150
-TILEHEIGHT = 150
-TARGETTILESWIDE = 150
+from apiclient.discovery import build
+from httplib2 import Http
+from oauth2client import client, tools
+from oauth2client.file import Storage
+from PIL import Image, ImageFilter
+
+DEFAULT_MAXLIBRARYSIZE = 10000
+DEFAULT_TILEWIDTH = 150
+DEFAULT_TARGETTILESWIDE = 100
+DEFAULT_DEFINITION = 1
 
 class LibraryImage():
     url = ""
@@ -34,8 +36,8 @@ def auth_to_service():
         creds = tools.run_flow(flow, store)
     return build('photoslibrary', 'v1', http=creds.authorize(Http()))
 
-def build_image_library(service):
-    print("Building image library (MAX %d images)..." % (MAXLIBRARYSIZE))
+def build_image_library(service, libsize):
+    print("Building image library (MAX %d images)..." % (libsize))
     imagecount = 0
     library = []
 
@@ -56,7 +58,7 @@ def build_image_library(service):
             imagecount = imagecount + 1
             if (imagecount % 100 == 0): print(str(imagecount) + " images found  == " + str(datetime.datetime.now()),end="\r")
 
-        if imagecount >= MAXLIBRARYSIZE: break
+        if imagecount >= libsize: break
 
         searchFilter['pageToken'] = ''
         if results['nextPageToken']:
@@ -132,8 +134,8 @@ def does_image_exist_in_radius(tileMap, imageName, radius, point):
                 return True
     return False
 
-def get_target_dimensions(sourceImg):
-    return (TARGETTILESWIDE, int(TARGETTILESWIDE * (sourceImg.height / sourceImg.width)))
+def get_target_dimensions(sourceImg, tileswide):
+    return (tileswide, int(tileswide * (sourceImg.height / sourceImg.width)))
     
 def find_closest_library_image(library, color, tileMap, tileMapLocation):
     closestDistance = 9999.0
@@ -165,7 +167,7 @@ def build_tile_map(sourceImg, library, targetDimensions):
     
     return tileMap
 
-def download_required_images(tileMap):
+def download_required_images(tileMap, tileSize):
     print("\nDownloading any missing picked images...")
     imagesToDownload = []
     for x in range(len(tileMap)):
@@ -178,14 +180,14 @@ def download_required_images(tileMap):
     for image in imagesToDownload:
         print("Downloading image %d of %d (%f %% complete)" % (progress, len(imagesToDownload), (progress * 100 / len(imagesToDownload))),end="\r")
         try:
-            urlretrieve("%s=w%d-h%d-c" % (image.url, TILEWIDTH, TILEHEIGHT), 'sourceimages/' + image.filename)
+            urlretrieve("%s=w%d-h%d-c" % (image.url, tileSize, tileSize), 'sourceimages/' + image.filename)
         except:
             print(":::  ERROR downloading " + image.filename)
         progress = progress + 1
 
-def build_final_image(library, tileMap, sourceImg, targetDimensions):
+def build_final_image(library, tileMap, sourceImg, targetDimensions, tileSize, output):
     print("\nStitching together the final image...")
-    finalImage = Image.new("RGB", (targetDimensions[0] * TILEWIDTH, targetDimensions[1] * TILEHEIGHT))
+    finalImage = Image.new("RGB", (targetDimensions[0] * tileSize, targetDimensions[1] * tileSize))
 
     progress = 0
     for x in range(targetDimensions[0]):
@@ -195,25 +197,36 @@ def build_final_image(library, tileMap, sourceImg, targetDimensions):
                 pickImg = Image.open('sourceimages/' + tileMap[x][y].filename)
                 imgcopy = pickImg.copy()
                 imgcopy = tint_image(imgcopy, tileMap[x][y].color)
-                finalImage.paste(imgcopy, (x * TILEWIDTH, y * TILEHEIGHT))
+                finalImage.paste(imgcopy, (x * tileSize, y * tileSize))
             except:
                 pass
             progress = progress + 1
 
-    finalImage.save("output.jpg")
+    finalImage.save(output)
+
+def setup_args():
+    parser = argparse.ArgumentParser("Py-Photomosaic -- A Python Photomosaic Generator")
+    parser.add_argument("-s", "--source", default="source.jpg", help="Input file for the source image used to build the mosaic. (default source.jpg)")
+    parser.add_argument("-o", "--output", default="output.jpg", help="Output file for generated photomosaic (default output.jpg)")
+    parser.add_argument("-l", "--libsize", type=int, default=DEFAULT_MAXLIBRARYSIZE, help="Maximum size of an image library to attempt to identify (default %d images).  Lower this to reduce number of files needed to download from Google." % (DEFAULT_MAXLIBRARYSIZE))
+    parser.add_argument("-w", "--targetwidth", type=int, default=DEFAULT_TARGETTILESWIDE, help="Target width IN TILES, not pixels, for the final image. (default %d)" % (DEFAULT_TARGETTILESWIDE))
+    parser.add_argument("-z", "--tilesize", type=int, default=DEFAULT_TILEWIDTH, help="Size of the tiles, in pixels.  Tiles will be squared, so a value of 150 would produce 150x150 tile sizes. (default %d)" % (DEFAULT_TILEWIDTH))
+    parser.add_argument("-d", "--definition", type=int, default=DEFAULT_DEFINITION, help="What level of definition should be used in mapping tiles to source image.  Higher numbers provide higher defintion. (default %d)" % (DEFAULT_DEFINITION))
+    return parser.parse_args()
 
 def main():
-    sourceImg = Image.open('source2.jpg')
-    targetDimensions = get_target_dimensions(sourceImg)
+    args = setup_args()
+    sourceImg = Image.open(args.source)
+    targetDimensions = get_target_dimensions(sourceImg, args.targetwidth)
     print("Target dimensions (in tiles): " + str(targetDimensions))
     
     service = auth_to_service()
-    library = build_image_library(service)
+    library = build_image_library(service, args.libsize)
     download_image_library(library)
     library = find_image_colors(library)
     tileMap = build_tile_map(sourceImg, library, targetDimensions)
-    download_required_images(tileMap)
-    build_final_image(library, tileMap, sourceImg, targetDimensions)
+    download_required_images(tileMap, args.tilesize)
+    build_final_image(library, tileMap, sourceImg, targetDimensions, args.tilesize, args.output)
 
 if __name__ == '__main__':
     main()
