@@ -20,7 +20,7 @@ DEFAULT_DEFINITION = 1
 class LibraryImage():
     url = ""
     filename = ""
-    color = (0, 0, 0)
+    color = [[]]
     
     def __init__(self, url, color, filename):
         self.url = url
@@ -52,11 +52,16 @@ def build_image_library(service, libsize):
 
     while request is not None:
         results = request.execute()
-        for result in results['mediaItems']:
-            library.append(LibraryImage(result['baseUrl'], (0,0,0), result['filename']))
-            
-            imagecount = imagecount + 1
-            if (imagecount % 100 == 0): print(str(imagecount) + " images found  == " + str(datetime.datetime.now()),end="\r")
+        try:
+            if results['mediaItems']:
+                for result in results['mediaItems']:
+                    library.append(LibraryImage(result['baseUrl'], [[]], result['filename']))
+                    
+                    imagecount = imagecount + 1
+                    if (imagecount % 100 == 0): print(str(imagecount) + " images found  == " + str(datetime.datetime.now()),end="\r")
+        except:
+            print("=== Error finding media items ===")
+            pass
 
         if imagecount >= libsize: break
 
@@ -68,21 +73,21 @@ def build_image_library(service, libsize):
     
     return library
 
-def download_image_library(library):
+def download_image_library(library, definition):
     print("\nDownloading missing images...")
-    targetWidth, targetHeight = 1, 1
+    targetWidth, targetHeight = definition, definition
     scaleString = "=w%d-h%d-c" % (targetWidth, targetHeight)
     downloadList = []
 
     for libImage in library:
-        if not os.path.isfile('images/' + libImage.filename):
+        if not os.path.isfile('libimages%dx%d/%s' % (definition, definition, libImage.filename)):
             downloadList.append(libImage)
 
     progress = 0
     for libImage in downloadList:
         print("Downloading image %d of %d (%f %% complete)" % (progress, len(downloadList), (progress * 100 / len(downloadList))),end="\r")
         try:
-            urlretrieve(libImage.url + scaleString, 'images/' + libImage.filename)
+            urlretrieve(libImage.url + scaleString, 'libimages%dx%d/%s' % (definition, definition, libImage.filename))
         except:
             print(":::  ERROR downloading " + libImage.filename)
         progress = progress + 1
@@ -93,13 +98,17 @@ def tint_image(im, color):
         color_map.extend(int(component/255.0*i) for i in range(256))
     return im.point(color_map)
 
-def find_image_colors(library):
+def find_image_colors(library, definition):
     index = 0
     for libItem in library:
         try:
-            img = Image.open('images/' + libItem.filename)
-            pixel = img.getpixel((0, 0))
-            library[index].color = pixel
+            img = Image.open('libimages%dx%d/%s' % (definition, definition, libItem.filename))
+            pixelmap = [[(0, 0, 0) for i in range(definition)] for j in range(definition)]
+            for x in range(definition):
+                for y in range(definition):
+                    pixelmap[x][y] = img.getpixel((x, y))
+
+            library[index].color = pixelmap
         except:
             pass
 
@@ -137,53 +146,69 @@ def does_image_exist_in_radius(tileMap, imageName, radius, point):
 def get_target_dimensions(sourceImg, tileswide):
     return (tileswide, int(tileswide * (sourceImg.height / sourceImg.width)))
     
-def find_closest_library_image(library, color, tileMap, tileMapLocation):
+def find_closest_library_image(library, colors, tileMap, tileMapLocation, definition):
     closestDistance = 9999.0
     pickedImage = library[0]
 
     for libraryImg in library:
-        distance = (((float(color[0]) - float(libraryImg.color[0]))** 2.0) + ((float(color[1]) - float(libraryImg.color[1]))** 2.0) + ((float(color[2]) - float(libraryImg.color[2]))** 2.0))**(0.5)
-        if distance < closestDistance and not does_image_exist_in_radius(tileMap, libraryImg.filename, 5, tileMapLocation):
+        distance = -0.01
+        for x in range(definition):
+            for y in range(definition):
+                if not(len(colors) < definition or len(libraryImg.color) < definition):
+                    distance = distance + (((float(colors[x][y][0]) - float(libraryImg.color[x][y][0]))** 2.0) + ((float(colors[x][y][1]) - float(libraryImg.color[x][y][1]))** 2.0) + ((float(colors[x][y][2]) - float(libraryImg.color[x][y][2]))** 2.0))**(0.5)
+        
+        distance = distance / definition
+        if distance >= 0 and distance < closestDistance and not does_image_exist_in_radius(tileMap, libraryImg.filename, 5, tileMapLocation):
             closestDistance = distance
             pickedImage = libraryImg
             
     return pickedImage
 
-def build_tile_map(sourceImg, library, targetDimensions):
-    tileMap = [[LibraryImage("", (0,0,0), "") for i in range(targetDimensions[1])] for j in range(targetDimensions[0])]
+def build_tile_map(sourceImg, library, targetDimensions, definition):
+    tileMap = [[LibraryImage("", [[]], "") for i in range(targetDimensions[1])] for j in range(targetDimensions[0])]
     tileMapSequence = get_randomized_tile_map(targetDimensions[0], targetDimensions[1])
-    sourceImg = sourceImg.resize((targetDimensions[0], targetDimensions[1]))
+    sourceImg = sourceImg.resize((targetDimensions[0] * definition, targetDimensions[1] * definition))
 
     print("\nPicking tiles...")
     progress = 0
     for tile in tileMapSequence:
         print("Picking tile %d of %d (%f %% complete)" % (progress, len(tileMapSequence), (progress * 100 / len(tileMapSequence))),end="\r")
         x = tile[0][0] #x-value from the tile
-        y = tile[0][1] #y-value from the tile
-        nextcolor = sourceImg.getpixel(tile[0])
-        pickedImage = find_closest_library_image(library, nextcolor, tileMap, tile[0])
+        y = tile[0][1]  #y-value from the tile
+        nextcolor = [[(0,0,0) for n in range(definition)] for m in range(definition)]
+        for i in range(definition):
+            for j in range(definition):
+                nextcolor[i][j] = sourceImg.getpixel(((tile[0][0] * definition) + i, (tile[0][1] * definition) + j))
+
+        pickedImage = find_closest_library_image(library, nextcolor, tileMap, tile[0], definition)
         tileMap[x][y] = pickedImage
         progress = progress + 1
     
     return tileMap
+
+def repick_missing_images(imageErrors, sourceImg, library, targetDimensions, definition):
+    return []
 
 def download_required_images(tileMap, tileSize):
     print("\nDownloading any missing picked images...")
     imagesToDownload = []
     for x in range(len(tileMap)):
         for y in range(len(tileMap[0])):
-            if not os.path.isfile('sourceimages/' + tileMap[x][y].filename):
+            if not os.path.isfile("sourceimages%dx%d/%s" % (tileSize, tileSize, tileMap[x][y].filename)):
                 imagesToDownload.append(tileMap[x][y])
     
     imagesToDownload = list(set(imagesToDownload))
     progress = 0
+    imageErrors = []
     for image in imagesToDownload:
         print("Downloading image %d of %d (%f %% complete)" % (progress, len(imagesToDownload), (progress * 100 / len(imagesToDownload))),end="\r")
         try:
-            urlretrieve("%s=w%d-h%d-c" % (image.url, tileSize, tileSize), 'sourceimages/' + image.filename)
+            urlretrieve("%s=w%d-h%d-c" % (image.url, tileSize, tileSize), ("sourceimages%dx%d/%s" % (tileSize, tileSize, image.filename)))
         except:
             print(":::  ERROR downloading " + image.filename)
+            imageErrors.append(image)
         progress = progress + 1
+    return imageErrors
 
 def build_final_image(library, tileMap, sourceImg, targetDimensions, tileSize, output):
     print("\nStitching together the final image...")
@@ -194,9 +219,9 @@ def build_final_image(library, tileMap, sourceImg, targetDimensions, tileSize, o
         for y in range(targetDimensions[1]):
             try:
                 print("Placing tile %d of %d (%f %% complete)" % (progress, (targetDimensions[0] * targetDimensions[1]), (progress * 100 / (targetDimensions[0] * targetDimensions[1]))),end="\r")
-                pickImg = Image.open('sourceimages/' + tileMap[x][y].filename)
+                pickImg = Image.open("sourceimages%dx%d/%s" % (tileSize, tileSize, tileMap[x][y].filename))
                 imgcopy = pickImg.copy()
-                imgcopy = tint_image(imgcopy, tileMap[x][y].color)
+                #imgcopy = tint_image(imgcopy, tileMap[x][y].color)
                 finalImage.paste(imgcopy, (x * tileSize, y * tileSize))
             except:
                 pass
@@ -219,13 +244,18 @@ def main():
     sourceImg = Image.open(args.source)
     targetDimensions = get_target_dimensions(sourceImg, args.targetwidth)
     print("Target dimensions (in tiles): " + str(targetDimensions))
-    
+    if not os.path.isdir('libimages%dx%d' % (args.definition, args.definition)):
+        os.mkdir('libimages%dx%d' % (args.definition, args.definition))
+    if not os.path.isdir('sourceimages%dx%d' % (args.tilesize, args.tilesize)):
+        os.mkdir('sourceimages%dx%d' % (args.tilesize, args.tilesize))
     service = auth_to_service()
     library = build_image_library(service, args.libsize)
-    download_image_library(library)
-    library = find_image_colors(library)
-    tileMap = build_tile_map(sourceImg, library, targetDimensions)
-    download_required_images(tileMap, args.tilesize)
+    download_image_library(library, args.definition)
+    library = find_image_colors(library, args.definition)
+    tileMap = build_tile_map(sourceImg, library, targetDimensions, args.definition)
+    imageErrors = download_required_images(tileMap, args.tilesize)
+    while len(imageErrors) > 0:
+        imageErrors = repick_missing_images(imageErrors, sourceImg, library, targetDimensions, args.definition)
     build_final_image(library, tileMap, sourceImg, targetDimensions, args.tilesize, args.output)
 
 if __name__ == '__main__':
