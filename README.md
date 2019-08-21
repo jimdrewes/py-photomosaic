@@ -18,12 +18,12 @@ Pull from the `presentation-v1.0` tag
 
 Next, install the required Python libraries.
 * httplib2
-** `pip install httplib2`
+  * `pip install httplib2`
 * oauth2client
-** `pip install oauth2client`
+  * `pip install oauth2client`
 * apiclient
-** `pip install apiclient`
+  * `pip install apiclient`
 * Google API client for Python (apiclient.discovery)
-** `pip install --upgrade google-api-python-client`
+  * `pip install --upgrade google-api-python-client`
 * Pillow (PIL)
-** `pip install Pillow`
+  * `pip install Pillow`
