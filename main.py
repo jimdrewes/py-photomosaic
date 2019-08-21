@@ -45,7 +45,7 @@ def build_image_library(service, libsize):
         "pageSize": 100,
         "filters": {
             "mediaTypeFilter": {"mediaTypes": ["PHOTO"]},
-            "contentFilter": {"excludedContentCategories": ["RECEIPTS", "DOCUMENTS", "WHITEBOARDS", "SCREENSHOTS"]}
+            "contentFilter": {"excludedContentCategories": ["RECEIPTS", "DOCUMENTS", "WHITEBOARDS", "SCREENSHOTS", "FOOD", "UTILITY"]}
         }
     }
     request = service.mediaItems().search(body=searchFilter)
@@ -53,7 +53,7 @@ def build_image_library(service, libsize):
     while request is not None:
         results = request.execute()
         try:
-            if results['mediaItems']:
+            if 'mediaItems' in results:
                 for result in results['mediaItems']:
                     library.append(LibraryImage(result['baseUrl'], [[]], result['filename']))
                     
@@ -66,8 +66,10 @@ def build_image_library(service, libsize):
         if imagecount >= libsize: break
 
         searchFilter['pageToken'] = ''
-        if results['nextPageToken']:
+        if 'nextPageToken' in results:
             searchFilter['pageToken'] = results['nextPageToken']
+        else:
+            break
 
         request = service.mediaItems().search(body=searchFilter)
     
@@ -84,13 +86,16 @@ def download_image_library(library, definition):
             downloadList.append(libImage)
 
     progress = 0
+    errors = 0
+    status = ()
     for libImage in downloadList:
-        print("Downloading image %d of %d (%f %% complete)" % (progress, len(downloadList), (progress * 100 / len(downloadList))),end="\r")
-        try:
-            urlretrieve(libImage.url + scaleString, 'libimages%dx%d/%s' % (definition, definition, libImage.filename))
-        except:
-            print(":::  ERROR downloading " + libImage.filename)
         progress = progress + 1
+        print("Downloading image %d of %d (%f %% complete) [%d errors (%f %%)]" % (progress, len(downloadList), (progress * 100 / len(downloadList)), errors, (errors * 100 / progress)),end="\r")
+        try:
+            status = urlretrieve(libImage.url + scaleString, 'libimages%dx%d/%s' % (definition, definition, libImage.filename))
+        except:
+            errors = errors + 1
+            print(":::  ERROR downloading " + libImage.filename) # + "\n\nURL: " + libImage.url + scaleString + "\n\nError msg:") # + str(e) + "\n\n  ===>>>  " + str(status[0] + " >>>" + str(status[1])))
 
 def tint_image(im, color):
     color_map = []
@@ -154,8 +159,11 @@ def find_closest_library_image(library, colors, tileMap, tileMapLocation, defini
         distance = -0.01
         for x in range(definition):
             for y in range(definition):
-                if not(len(colors) < definition or len(libraryImg.color) < definition):
-                    distance = distance + (((float(colors[x][y][0]) - float(libraryImg.color[x][y][0]))** 2.0) + ((float(colors[x][y][1]) - float(libraryImg.color[x][y][1]))** 2.0) + ((float(colors[x][y][2]) - float(libraryImg.color[x][y][2]))** 2.0))**(0.5)
+                if not (len(colors) < definition or len(libraryImg.color) < definition):
+                    try:
+                        distance = distance + (((float(colors[x][y][0]) - float(libraryImg.color[x][y][0]))** 2.0) + ((float(colors[x][y][1]) - float(libraryImg.color[x][y][1]))** 2.0) + ((float(colors[x][y][2]) - float(libraryImg.color[x][y][2]))** 2.0))**(0.5)
+                    except:
+                        print("ERROR trying to find distance.  LibraryImg.color:  " + str(libraryImg.color) + "   >> COLORS: "+ str(colors))
         
         distance = distance / definition
         if distance >= 0 and distance < closestDistance and not does_image_exist_in_radius(tileMap, libraryImg.filename, 5, tileMapLocation):
