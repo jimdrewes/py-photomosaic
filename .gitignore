@@ -9,3 +9,6 @@ images/*
 *.pyc
 .vscode*
 .DS_Store
+*.jpg
+*.png
+output.jpg
