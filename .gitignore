@@ -11,4 +11,6 @@ libimages*/*
 .DS_Store
 *.jpg
 *.png
+*.lib
+*.map
 images*/*
